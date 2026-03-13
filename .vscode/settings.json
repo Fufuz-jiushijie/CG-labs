@@ -1,0 +1,10 @@
+{
+    "python.terminal.activateEnvironment": false,
+    "python.terminal.focusAfterLaunch": true,
+    "editor.autoClosingDelete": "always",
+    "editor.autoClosingQuotes": "always",
+    "editor.autoIndent": "brackets",
+    "editor.autoIndentOnPaste": true,
+    "editor.bracketPairColorization.independentColorPoolPerBracketType": true,
+    "files.autoSave": "onWindowChange"
+}
