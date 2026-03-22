@@ -10,17 +10,19 @@
 - 局部坐标系 $\xrightarrow{\text{Model}}$
 - 世界坐标系 $\xrightarrow{\text{View}}$
 - 眼睛坐标系 $\xrightarrow{\text{Projection}}$
-- 带 $w$ 的设备坐标系$\xrightarrow{\text{Perspective Divide}}$
+- 带 $w$ 的设备坐标系 $\xrightarrow{\text{Perspective Divide}}$
 - 归一化设备坐标 $\xrightarrow{\text{Viewport}}$
 - 屏幕显示
 
 ## 🎬 效果展示与数学原理
 
 ### 案例1:平面三角形
-
+<div align="center">
 <img src="../../gifs/Work2/triangle.gif" width="300">
+</div>
 按a绕z轴逆时针转，按d绕z轴顺时针转。数学原理是修改模型矩阵中的旋转矩阵的参数。
-#### 数据流动：  
+<br />
+数据流动：  
 在main函数中init了ti后端，初始化原始顶点和屏幕顶点Vectorfield。并实例化RenderState类为state，
 这个类用来管理输入给核心计算函数compute_transform函数的实参值，并提供默认值。  
 然后根据这次要跑三角形还是正方体，修改RenderState类的shape_type属性，并给vertices field传入实际值
@@ -28,9 +30,10 @@
 
 ### 案例2: 三位立方体
 
-在本案例中，将展示修改更多参数的效果，并讲解其数学原理。更详细的数学推导请参考手写笔记。  
+在本案例中，将展示修改更多参数的效果，并讲解其数学原理。更详细的数学推导请参考[手写笔记](../../gifs/handwrittennotes_MVP.pdf)
 
 <br />
+复合变换效果:
 
 <div align="center">
 <img src="../../gifs/Work2/cube_all.gif" width="200">
@@ -197,3 +200,5 @@ def compute_transform(
 - **类型声明必须**：Taichi 是静态编译语言，参数必须声明类型
 - **避免 Python 对象**：Kernel 内部不要使用 list、dict 等 Python 对象
 
+### 📝 [手写笔记 - MVP矩阵推导](../../gifs/handwrittennotes_MVP.pdf)
+> 点击上方链接查看手写推导PDF。
