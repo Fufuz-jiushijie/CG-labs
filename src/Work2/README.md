@@ -16,7 +16,7 @@
 ## 🎬 效果展示与数学原理
 
 ### 案例1:平面三角形
-![三角形效果](../../gifs/Work2/triangle.gif)
+<img src="../../gifs/Work2/triangle.gif" width="300">
 按a绕z轴逆时针转，按d绕z轴顺时针转。数学原理是修改模型矩阵中的旋转矩阵的参数。
 #### 数据流动：  
 在main函数中init了ti后端，初始化原始顶点和屏幕顶点Vectorfield。并实例化RenderState类为state，
@@ -28,7 +28,13 @@
 
 ### 案例2: 三位立方体
 在本案例中，将展示修改更多参数的效果，并讲解其数学原理。更详细的数学推导请参考手写笔记。
-![效果展示](../../gifs/Work2/cube_rotate_Z.gif)
+
+<div align="center">
+<img src="../../gifs/Work2/cube_rotate_Z.gif" width="200">
+<img src="../../gifs/Work2/cube_rotate_Y.gif" width="200">
+<img src="../../gifs/Work2/cube_rotate_X.gif" width="200">
+</div>
+
 ## 🎮 操作说明
 
 | 按键 | 功能 |
@@ -44,9 +50,13 @@
 | ESC | 退出程序 |
 
 ### 1. 模型变换  
-![绕z轴旋转](../../gifs/Work2/cube_rotate_Z.gif)
-![绕Y轴旋转](../../gifs/Work2/cube_rotate_Y.gif)
-![绕X轴旋转](../../gifs/Work2/cube_rotate_X.gif)  
+
+<div align="center">
+<img src="../../gifs/Work2/cube_rotate_Z.gif" width="200">
+<img src="../../gifs/Work2/cube_rotate_Y.gif" width="200">
+<img src="../../gifs/Work2/cube_rotate_X.gif" width="200">
+</div>
+
 👉 视觉效果：Cube 在空间中绕着 X/Y/Z 轴自转，并可以在世界中平移()。  
 
 🧠 数学理解：   
@@ -54,8 +64,10 @@
 在代码中，按照缩放 $\rightarrow$ 旋转 $\rightarrow$ 平移的顺序依次变换 ($M = T \cdot R_z \cdot R_y \cdot R_x \cdot S$)，对应矩阵从右向左依次乘积。这确保了物体的旋转是基于自身的局部坐标轴，避免了平移后旋转，就不饶物体中心转了。  
 ### 2. 视图变换
 
-![相机XY轴移动](../../gifs/Work2/cube_eyepos_XY.gif)
-![相机Z轴移动](../../gifs/Work2/cube_eyepos_Z.gif)
+<div align="center">
+<img src="../../gifs/Work2/cube_eyepos_XY.gif" width="200">
+<img src="../../gifs/Work2/cube_eyepos_Z.gif" width="200">
+</div>
 
 👉 视觉效果：当我们按下按键时，仿佛是相机在 3D 空间中漫游、拉近或环绕 Cube 观察。  
 
@@ -64,7 +76,10 @@
 通过相机位置 (eye)、目标点 (target) 和参考上方 (up)，利用向量叉乘求出相机的真实右向 $\vec{u}$、正上方 $\vec{v}$ 和前向 $\vec{w}$。将这三个相互正交的单位向量作为行向量填入矩阵，巧妙地利用了“正交矩阵的逆等于其转置”的数学性质，完成了世界坐标系的逆旋转对齐。 
 
 ### 3. 透视投影变换
-![FOV变化](../../gifs/Work2/cube_fov_y.gif)
+
+<div align="center">
+<img src="../../gifs/Work2/cube_fov_y.gif" width="300">
+</div>
 
 👉 视觉效果：调整 FOV (视场角) 时，画面产生强烈的广角拉伸或长焦压缩感；距离相机越远的顶点，在屏幕上显得越小。  
 🧠 数学理解：  
