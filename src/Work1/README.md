@@ -27,4 +27,4 @@ uv run -m src.Work0.main
 ```
 
 ## 3.运行效果
-![这里写图片的描述文字](../../gifs/Work0.gif)
+![这里写图片的描述文字](../../gifs/Work1/Work1.gif)

@@ -135,8 +135,8 @@ def get_projection_matrix(fov_y: ti.f32, aspect_ratio: ti.f32, z_near: ti.f32, z
     """
     
     # 利用fov_y, near 和aspect_ratio计算出近截面的边界
-    
-    max_y = z_near * ti.tan(fov_y)
+    # fov_y这里需要传弧度！
+    max_y = z_near * ti.tan(fov_y/2.0)
     min_y = -max_y
     max_x = max_y * aspect_ratio
     min_x = -max_x
