@@ -207,6 +207,8 @@ def compute_transform(
         # 视口变换，自动写入对应索引的 screen_coords
         screen_coords[i][0] = (v_ndc[0] + 1.0) / 2.0
         screen_coords[i][1] = (v_ndc[1] + 1.0) / 2.0
+        # 记录 NDC 深度（用于面深度排序/简单明暗调制）
+        screen_coords[i][2] = v_ndc[2]
         
         # if i==0:
         #     print("A:")
