@@ -3,8 +3,10 @@
     "python.terminal.focusAfterLaunch": true,
     "editor.autoClosingDelete": "always",
     "editor.autoClosingQuotes": "always",
-    "editor.autoIndent": "brackets",
+    "editor.autoIndent": "full",
     "editor.autoIndentOnPaste": true,
     "editor.bracketPairColorization.independentColorPoolPerBracketType": true,
-    "files.autoSave": "onWindowChange"
+    "files.autoSave": "afterDelay",
+    "editor.fontSize": 16,
+    "editor.tabCompletion": "on"
 }
