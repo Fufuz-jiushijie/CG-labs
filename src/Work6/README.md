@@ -33,23 +33,19 @@ PyTorch3D 的 **可微渲染** 通过两项技巧近似连续：
 
 ---
 
-## 3. 优化问题 formulation
+## 3. 优化问题
 
 ### 3.1 变量与初始化
 
-- **目标网格**：从 `cow.obj` 加载，顶点中心化并缩放到单位尺度，作为 Ground Truth 几何。
-- **源网格**：`ico_sphere(4)`，仅优化 **顶点偏移** `deform_verts`（与 `src_mesh` 同形状的可学习张量），等价于在球面上做自由形变。
+- **目标网格**：从 `cow.obj` 加载，顶点中心化并缩放到单位尺度。
+- **源网格**：`ico_sphere(4)`，仅优化顶点偏移 `deform_verts`。
 - **优化器**：`SGD`，学习率 `1.0`，动量 `0.9`，共 `1000` 步。
 
 ### 3.2 多视角剪影
 
-在水平方向均匀取 **20 个视角**（方位角从 -180° 到 180°），相机距离约 `2.7`，用 `FoVPerspectiveCameras` + `look_at_view_transform` 生成 `R, T`。
-
-对目标牛模型渲染得到 `target_silhouette`；每一步对当前形变网格渲染得到 `pred_silhouette`，二者在 alpha 通道上对齐。
+20 个方位角（-180°～180°），相机距离约 `2.7`，渲染得到 `target_silhouette` 与每步的 `pred_silhouette`。
 
 ### 3.3 损失函数
-
-总损失为四项之和：
 
 $$
 \mathcal{L} = \mathcal{L}_{\text{sil}} + \lambda_1 \mathcal{L}_{\text{lap}} + \lambda_2 \mathcal{L}_{\text{edge}} + \lambda_3 \mathcal{L}_{\text{normal}}
@@ -57,16 +53,14 @@ $$
 
 | 项 | 系数 | 作用 |
 |----|------|------|
-| **剪影项** `L_sil` | — | 预测与目标剪影的 **MSE**，主监督信号 |
-| `mesh_laplacian_smoothing` | 1.0 | 拉普拉斯平滑，避免顶点剧烈抖动 |
-| `mesh_edge_loss` | 0.1 | 边长惩罚，抑制拉伸与折叠 |
-| `mesh_normal_consistency` | 0.01 | 相邻面法向一致，减轻自交与尖刺 |
+| **剪影项** `L_sil` | — | 预测与目标剪影的 **MSE** |
+| `mesh_laplacian_smoothing` | 1.0 | 拉普拉斯平滑 |
+| `mesh_edge_loss` | 0.1 | 边长惩罚 |
+| `mesh_normal_consistency` | 0.01 | 法向一致性 |
 
 表中 `L_sil` 即上式中的 $\mathcal{L}_{\text{sil}}$。
 
 ### 3.4 收敛结果（1000 步，末次记录）
-
-在默认超参与 `cow.obj` 目标下，最后一轮（epoch 999）控制台输出为：
 
 | 指标 | 数值 |
 |------|------|
@@ -87,21 +81,17 @@ flowchart TB
         SPHERE["ico_sphere(4) + deform_verts=0"]
     end
     subgraph Loop["每步优化"]
-        DEF["new_mesh = sphere.offset_verts(deform_verts)"]
-        REN["SoftSilhouette 渲染 pred_silhouette"]
-        LOSS["L = MSE + 正则项"]
-        BP["loss.backward() + SGD.step()"]
+        DEF["offset_verts → 渲染 pred"]
+        LOSS["MSE + 正则"]
+        BP["backward + SGD"]
     end
     subgraph Out["输出"]
-        SAVE["每 20 步 save_obj → output_meshes/"]
-        VIS["matplotlib 对比 GT / Pred"]
+        SAVE["每 20 步 save_obj"]
+        VIS["matplotlib 对比"]
     end
     OBJ --> GT
     SPHERE --> DEF
-    DEF --> REN
-    REN --> LOSS
-    LOSS --> BP
-    BP --> DEF
+    DEF --> LOSS --> BP --> DEF
     BP --> SAVE
     BP --> VIS
 ```
@@ -112,58 +102,62 @@ flowchart TB
 
 ```
 src/Work6/
-├── main.py              # 可微渲染 + 优化主程序
-├── cow.obj              # 目标模型（需自行放置，与 main.py 同目录）
-├── output_meshes/       # 运行后生成：mesh_epoch_000.obj, ...
+├── main.py              # 可微渲染 + 优化
+├── make_mesh_gif.py     # 由 output_meshes 合成形变 GIF（ModelScope）
+├── cow.obj              # 目标模型（与 main.py 同目录，需自行放置）
+├── output_meshes/       # 运行后：mesh_epoch_XXX.obj
 └── README.md
 ```
 
-`main.py` 使用相对路径 `"cow.obj"`，请在 **`src/Work6` 目录下** 启动程序，或将 `cow.obj` 放在当前工作目录。
+请在 **`src/Work6` 目录** 下运行 `main.py`，或保证当前工作目录能找到 `cow.obj`。
 
 ---
 
 ## 6. 环境与运行
 
-本实验依赖 **PyTorch** 与 **PyTorch3D**（未写入仓库根目录 `pyproject.toml`，需单独安装）。建议在有 **CUDA** 的机器上运行以加速；代码会自动选择 `cuda:0` 或 `cpu`。
+### 6.1 本地 / ModelScope 训练
+
+**PyTorch3D 未写入** 根目录 `pyproject.toml`，需在运行环境中单独安装（ModelScope 可用课程提供的 Gitee 源码 `%pip install`）。
 
 ```bash
-# 示例：安装 PyTorch3D（请按官方文档选择与 CUDA 匹配的 wheel）
-pip install torch torchvision
-pip install pytorch3d
-
-pip install matplotlib numpy
-
 cd src/Work6
-# 将课程提供的 cow.obj 放在此目录
+# 放置 cow.obj 后
 python main.py
 ```
 
-也可在 Jupyter 中运行：程序使用 `IPython.display.clear_output` 刷新训练日志，并周期性弹出剪影对比图。
+Jupyter 下使用 `IPython.display.clear_output` 刷新日志；每 20 步保存 `output_meshes/mesh_epoch_XXX.obj`。
 
-**运行产物**
+**ModelScope 注意**：安装请用 **`%pip`**（不要用 `!pip`）；训练避免仅用 `!python main.py`（子进程有包、内核可能没有）。生成 GIF 前在本 Notebook 执行 `import pytorch3d` 确认无报错。
 
-- `output_meshes/mesh_epoch_XXX.obj`：每 20 步及最后一帧的中间网格，可用 MeshLab / Blender 查看形变过程。
-- 控制台：总 Loss、剪影 MSE；图中左为 GT 剪影，右为当前预测。
+### 6.2 由 `output_meshes` 生成形变 GIF
+
+```python
+%run make_mesh_gif.py
+```
+
+脚本按 epoch 顺序加载 OBJ，Phong 固定相机渲染并输出 `Cow_mesh.gif`（详见 `make_mesh_gif.py` 顶部说明）。`HardPhongShader` 需顶点纹理，脚本内已为 OBJ 附加 `TexturesVertex`。
 
 ---
 
 ## 7. 效果展示
 
-### 7.1 剪影对比（正面 / 背面）
-
-优化收敛后，多视角剪影与目标的一致性。（每20个 epoch 的 obj 文件在 `../../gifs/Work6/output_meshes/`）
+### 7.1 形变过程
 
 <div align="center">
-<img src="../../gifs/Work6/Cow_mesh.gif" alt="可微渲染优化：网格从球体形变为牛模型" width="520">
+<img src="../../gifs/Work6/Cow_process.gif" alt="可微渲染优化过程" width="520">
+</div>
+
+### 7.2 旋转展示与剪影对比
+
+<div align="center">
+<img src="../../gifs/Work6/Cow_mesh.gif" alt="优化后模型旋转" width="520">
 </div>
 
 <div align="center">
-<img src="../../gifs/Work6/Two_cow.png" alt="正面视角：目标剪影与优化结果对比" width="420">
+<img src="../../gifs/Work6/Two_cow.png" alt="正面剪影对比" width="420">
 &nbsp;&nbsp;
-<img src="../../gifs/Work6/TwoCow_back.png" alt="背面视角：目标剪影与优化结果对比" width="420">
+<img src="../../gifs/Work6/TwoCow_back.png" alt="背面剪影对比" width="420">
 </div>
-
-<p align="center"><em>左：Two_cow.png  右：TwoCow_back.png</em></p>
 
 ---
 
@@ -172,28 +166,28 @@ python main.py
 | 知识点 | 本仓库实现 |
 |--------|------------|
 | 可微光栅化 / 软剪影 | `MeshRasterizer` + `SoftSilhouetteShader` |
-| 多视角几何约束 | 20 个 `FoVPerspectiveCameras` |
+| 多视角约束 | 20 个 `FoVPerspectiveCameras` |
 | 逆问题与梯度下降 | `deform_verts` + `SGD` |
-| 网格先验 / 正则化 | Laplacian、edge、normal consistency |
-| 结果导出 | `save_obj` → `output_meshes/` |
+| 网格正则 | Laplacian、edge、normal consistency |
+| 中间结果 | `save_obj` → `output_meshes/` |
 
 ---
 
 ## 9. 常见问题
 
-| 现象 | 可能原因 |
-|------|----------|
-| `未找到 cow.obj` | 未将模型放在运行目录，或未 `cd src/Work6` |
-| Loss 下降极慢 | CPU 训练；可减小 `num_views` 或 `epochs` 做调试 |
-| 网格出现自交或噪声 | 增大拉普拉斯/边长权重，或降低学习率 |
-| 安装 PyTorch3D 失败 | 需与 PyTorch、CUDA 版本匹配的预编译包，见 [PyTorch3D 安装说明](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md) |
+| 现象 | 处理 |
+|------|------|
+| `未找到 cow.obj` | 在 `src/Work6` 下运行并放置模型 |
+| `No module named pytorch3d'` | 同一内核用 `%pip` 安装；见 §6.1 |
+| `Meshes does not have textures`（GIF 脚本） | 使用仓库最新 `make_mesh_gif.py` |
+| Loss 很慢 | 使用 GPU；或减少 `num_views` / `epochs` 调试 |
 
 ---
 
 ## 10. 参考文献
 
-- Loper & Black, *OpenDR: An Approximate Differentiable Renderer* (ECCV 2014)
-- Liu et al., *Soft Rasterizer: A Differentiable Renderer for Image-based 3D Reasoning* (ICCV 2019)
-- PyTorch3D 教程：[Fit a mesh via rendered silhouette supervision](https://pytorch3d.org/tutorials/fit_simple_mesh)
+- Loper & Black, *OpenDR* (ECCV 2014)
+- Liu et al., *Soft Rasterizer* (ICCV 2019)
+- [PyTorch3D：Fit a mesh via silhouette](https://pytorch3d.org/tutorials/fit_simple_mesh)
 
 ---

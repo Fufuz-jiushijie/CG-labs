@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# 实验模型与优化中间网格（体积大 / 有许可，需本地或课程环境自行放置）
+src/Work8/models/
+src/Work6/cow.obj
+src/Work6/output_meshes/
+gifs/Work6/output_meshes/
