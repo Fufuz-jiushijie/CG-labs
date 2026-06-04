@@ -57,7 +57,7 @@ $$
 
 | 项 | 系数 | 作用 |
 |----|------|------|
-| $\mathcal{L}_{\text{sil}}$ | — | 预测与目标剪影的 **MSE**，主监督信号 |
+| $ \mathcal{L}_{\text{sil}} $ | — | 预测与目标剪影的 **MSE**，主监督信号 |
 | `mesh_laplacian_smoothing` | 1.0 | 拉普拉斯平滑，避免顶点剧烈抖动 |
 | `mesh_edge_loss` | 0.1 | 边长惩罚，抑制拉伸与折叠 |
 | `mesh_normal_consistency` | 0.01 | 相邻面法向一致，减轻自交与尖刺 |
@@ -147,17 +147,13 @@ python main.py
 
 ## 7. 效果展示
 
-### 7.1 网格形变过程
+### 7.1 剪影对比（正面 / 背面）
 
-从球体逐步拟合牛模型轮廓的中间状态（动画）。
+优化收敛后，多视角剪影与目标的一致性。（每20个 epoch 的 obj 文件在 `../../gifs/Work6/output_meshes/`）
 
 <div align="center">
 <img src="../../gifs/Work6/Cow_mesh.gif" alt="可微渲染优化：网格从球体形变为牛模型" width="520">
 </div>
-
-### 7.2 剪影对比（正面 / 背面）
-
-优化收敛后，多视角剪影与目标的一致性（静态截图）。
 
 <div align="center">
 <img src="../../gifs/Work6/Two_cow.png" alt="正面视角：目标剪影与优化结果对比" width="420">

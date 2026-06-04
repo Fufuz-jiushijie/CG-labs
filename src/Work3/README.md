@@ -244,7 +244,7 @@ python src/Work3/main.py
 
 ### 7.2 反走样（`a`）
 
-同一几何下开关 **3×3 高斯 splat**，边缘锯齿与柔和程度的差异。
+同一几何下开关 **3×3 高斯反走样**，边缘锯齿与柔和程度的差异。
 
 <div align="center">
 <img src="../../gifs/Work3/against.gif" alt="反走样开与关对比" width="520">
@@ -262,9 +262,9 @@ python src/Work3/main.py
 <img src="../../gifs/Work3/b-spline_localcontrol.gif" alt="均匀三次 B 样条：局部调整控制点影响邻近曲线段" width="520">
 </div>
 
-### 7.5 静态画面对比（PNG）
+### 7.5 静态画面对比
 
-同一实验条件下 **Bézier** 与 **B 样条** 单帧截图，便于报告排版对照。
+相同控制点下 **Bézier** 与 **B 样条** 对照。
 
 <div align="center">
 <img src="../../gifs/Work3/bezier.png" alt="Bézier 模式截图" width="420">
