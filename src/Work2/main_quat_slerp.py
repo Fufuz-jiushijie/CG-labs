@@ -111,62 +111,71 @@ def blend_over_white(face_color_hex: int, alpha: float) -> int:
     return rgb_to_hex(r, g, b)
 
 
-def draw_cube_faces(
-    gui: ti.GUI,
-    screen_coords: ti.Field,
-    faces: List[Tuple[int, int, int, int]],
-    color_hex: int,
-    alpha: float,
-):
-    # 按 NDC z 平均值从远到近画（更适合半透明）
-    face_with_depth = []
-    for (a, b, c, d) in faces:
-        z_avg = float((screen_coords[a][2] + screen_coords[b][2] + screen_coords[c][2] + screen_coords[d][2]) / 4.0)
-        face_with_depth.append((z_avg, (a, b, c, d)))
-    face_with_depth.sort(key=lambda x: x[0], reverse=True)
-
-    fill_color = blend_over_white(color_hex, alpha)
-
-    for _, (a, b, c, d) in face_with_depth:
-        p0 = ti.Vector([screen_coords[a][0], screen_coords[a][1]])
-        p1 = ti.Vector([screen_coords[b][0], screen_coords[b][1]])
-        p2 = ti.Vector([screen_coords[c][0], screen_coords[c][1]])
-        p3 = ti.Vector([screen_coords[d][0], screen_coords[d][1]])
-        gui.triangle(p0, p1, p2, color=fill_color)
-        gui.triangle(p0, p2, p3, color=fill_color)
-
-
-def draw_cube_edges(
-    gui: ti.GUI,
-    screen_coords: ti.Field,
-    edges: Sequence[Tuple[int, int]],
-    color: int = 0x000000,
-    radius: int = 1,
-):
-    for i, j in edges:
-        p1 = ti.Vector([screen_coords[i][0], screen_coords[i][1]])
-        p2 = ti.Vector([screen_coords[j][0], screen_coords[j][1]])
-        gui.line(p1, p2, radius=radius, color=color)
-
-
 def write_rotated_vertices(vertices: ti.Field, base_vertices: Sequence[Vec3], q: Quat):
     for i in range(8):
         rx, ry, rz = quat_rotate_vec3(q, base_vertices[i])
         vertices[i] = (rx, ry, rz)
 
 
+def cube_screen_points(vertices, screen_coords, state, base_vertices, q, translation):
+    """旋转 + 平移并做 MVP 变换，返回该立方体 8 个顶点的屏幕坐标 [(x, y, z_ndc), ...]。"""
+    write_rotated_vertices(vertices, base_vertices, q)
+    state.translation = ti.math.vec3([translation[0], translation[1], translation[2]])
+    compute_transform(
+        vertices, screen_coords,
+        state.eye_pos, state.target_pos, state.up,
+        state.translation, state.rotation_angles, state.scale,
+        state.fov_y, state.aspect_ratio, state.z_near, state.z_far,
+    )
+    return [
+        (float(screen_coords[i][0]), float(screen_coords[i][1]), float(screen_coords[i][2]))
+        for i in range(8)
+    ]
+
+
+def render_scene(gui, cube_list, faces, edges):
+    """全局画家算法：把所有立方体的面/边按深度统一排序后绘制，
+    使共面的立方体按真实深度互相遮挡，而非按绘制先后顺序覆盖。"""
+    face_batch = []  # (z_avg, p0, p1, p2, p3, fill_color)
+    edge_batch = []  # (z_avg, pa, pb, color, radius)
+
+    for pts, face_color, alpha, edge_color, edge_radius in cube_list:
+        fill = blend_over_white(face_color, alpha)
+        for (a, b, c, d) in faces:
+            z = (pts[a][2] + pts[b][2] + pts[c][2] + pts[d][2]) / 4.0
+            face_batch.append((z, pts[a], pts[b], pts[c], pts[d], fill))
+        for (i, j) in edges:
+            z = (pts[i][2] + pts[j][2]) / 2.0
+            edge_batch.append((z, pts[i], pts[j], edge_color, edge_radius))
+
+    # 从远到近绘制
+    face_batch.sort(key=lambda f: f[0], reverse=True)
+    for _, p0, p1, p2, p3, fill in face_batch:
+        v0 = ti.Vector([p0[0], p0[1]])
+        v1 = ti.Vector([p1[0], p1[1]])
+        v2 = ti.Vector([p2[0], p2[1]])
+        v3 = ti.Vector([p3[0], p3[1]])
+        gui.triangle(v0, v1, v2, color=fill)
+        gui.triangle(v0, v2, v3, color=fill)
+
+    edge_batch.sort(key=lambda e: e[0], reverse=True)
+    for _, pa, pb, color, radius in edge_batch:
+        gui.line(ti.Vector([pa[0], pa[1]]), ti.Vector([pb[0], pb[1]]), radius=radius, color=color)
+
+
 def main():
-    ti.init(arch=ti.cpu)
+    ti.init(arch=ti.gpu)
 
     state = RenderState(shape_type="cube")
     
-    state.eye_pos = ti.math.vec3([0.0, 3.0, 9.0]) 
-    
-    # target_pos: 观察目标 (y=0.4 是为了稍微抬高视点，因为圆弧是在y=0到y≈0.8之间)
-    state.target_pos = ti.math.vec3([0.0, 0.0, 1.0]) 
-    
-    # up: 相机的向上方向 (保持世界坐标系的Y轴向上)
-    state.up = ti.math.vec3([0.0, -1.0, 0.0])
+    # 正对 xOy 旋转平面：相机放在 +Z 轴上，沿 -Z 方向直视，不俯仰/不倾斜
+    state.eye_pos = ti.math.vec3([0.0, 0.0, 9.0])
+
+    # target_pos: 看向原点（轨迹中心），视线垂直于 xOy 平面
+    state.target_pos = ti.math.vec3([0.0, 0.0, 0.0])
+
+    # up: 世界坐标系 Y 轴朝上（屏幕上 +y 向上，+x 向右）
+    state.up = ti.math.vec3([0.0, 1.0, 0.0])
     # 顶点 field（每次绘制一个立方体就覆盖写入一次）
     vertices = ti.Vector.field(3, dtype=ti.f32, shape=state.num_vertices)
     # screen_coords: [x_screen, y_screen, z_ndc]
@@ -195,19 +204,33 @@ def main():
         (0, 4, 7, 3),
     ]
 
-    # 端点姿态：从 +Z 方向看，绕 Y 轴旋转（示例：0 -> 180°）
-    q0: Quat = (1.0, 0.0, 0.0, 0.0)
-    q1: Quat = quat_from_axis_angle((0.0, 1.0, 0.0), math.pi)
+    # 端点姿态：绕 Z 轴（垂直于 xOy 旋转平面）旋转，使立方体的同一面始终朝向圆心。
+    # 位置极角 ang = pi*(1-t)，让朝向角等于 ang，则 slerp(q0,q1,t) 恰好 = 绕 Z 转 ang，
+    # 立方体随半径转动（-X 面始终指向圆心），而不是原来的绕 Y 自转。
+    q0: Quat = quat_from_axis_angle((0.0, 0.0, 1.0), math.pi)  # 左端点 t=0，ang=pi
+    q1: Quat = (1.0, 0.0, 0.0, 0.0)                            # 右端点 t=1，ang=0（单位四元数）
 
-    # 颜色（淡蓝 / 淡黄）
+    # 颜色（淡蓝端点 / 淡黄路径 / 橙色匀速移动体）
     blue = 0x7EC8FF
     yellow = 0xFFF2A1
+    orange = 0xFF8C42
 
     gui = ti.GUI("Quaternion SLERP Cube (Work2)", res=(800, 600))
 
     t_time = 0.0
     dt = 1.0 / 60.0
     duration = 2.5  # 秒
+
+    # 旋转完全由四元数烘焙进顶点，模型矩阵的欧拉角保持为 0
+    state.rotation_angles = ti.math.vec3([0.0, 0.0, 0.0])
+
+    # 端点立方体放在 x 负/正半轴；插值体沿上半圆弧摆放
+    endpoint_x = 1.5
+    R = endpoint_x
+
+    def arc_pos(t: float) -> Tuple[float, float]:
+        ang = math.pi * (1.0 - t)  # t=0 -> pi (左)，t=1 -> 0 (右)
+        return R * math.cos(ang), R * math.sin(ang) * 1
 
     while gui.running:
         while gui.get_event(ti.GUI.PRESS):
@@ -244,63 +267,38 @@ def main():
         # gui.clear(0xFFFFFF)
 
         t_time += dt
-        # ping-pong: 0->1->0
+        # ping-pong: 0->1->0，t_anim 关于时间分段线性（匀速）
         phase = (t_time / duration) % 2.0
         t_anim = phase if phase <= 1.0 else (2.0 - phase)
 
-        # 端点立方体：放在 x 负/正半轴
-        endpoint_x = 1.5
+        # 收集本帧所有立方体（端点 + 静态路径 + 匀速移动体），稍后统一按深度排序绘制。
+        # 这样所有立方体共用同一套深度遮挡关系，黄/橙不会因为“后画”就盖在蓝色上面。
+        # cube_list 元素：(屏幕坐标点列表, 面颜色, alpha, 边颜色, 边半径)
+        cube_list = []
 
-        # 画左端点（t=0，淡蓝半透明）
-        q_left = q0
-        write_rotated_vertices(vertices, base_vertices, q_left)
-        state.translation = ti.math.vec3([-endpoint_x, 0.0, 0.0])
-        state.rotation_angles = ti.math.vec3([0.0, 0.0, 0.0])
-        compute_transform(
-            vertices,
-            screen_coords,
-            state.eye_pos, state.target_pos, state.up,
-            state.translation, state.rotation_angles, state.scale,
-            state.fov_y, state.aspect_ratio, state.z_near, state.z_far
-        )
-        draw_cube_faces(gui, screen_coords, faces, blue, alpha=0.35)
-        draw_cube_edges(gui, screen_coords, state.edges, color=0x2B2B2B, radius=1)
+        # 左端点（t=0，淡蓝半透明）
+        pts = cube_screen_points(vertices, screen_coords, state, base_vertices, q0, (-endpoint_x, 0.0, 0.0))
+        cube_list.append((pts, blue, 0.35, 0x2B2B2B, 1))
 
-        # 画右端点（t=1，淡蓝半透明）
-        q_right = q1
-        write_rotated_vertices(vertices, base_vertices, q_right)
-        state.translation = ti.math.vec3([endpoint_x, 0.0, 0.0])
-        compute_transform(
-            vertices,
-            screen_coords,
-            state.eye_pos, state.target_pos, state.up,
-            state.translation, state.rotation_angles, state.scale,
-            state.fov_y, state.aspect_ratio, state.z_near, state.z_far
-        )
-        draw_cube_faces(gui, screen_coords, faces, blue, alpha=0.35)
-        draw_cube_edges(gui, screen_coords, state.edges, color=0x2B2B2B, radius=1)
+        # 右端点（t=1，淡蓝半透明）
+        pts = cube_screen_points(vertices, screen_coords, state, base_vertices, q1, (endpoint_x, 0.0, 0.0))
+        cube_list.append((pts, blue, 0.35, 0x2B2B2B, 1))
 
-        # 5 个插值立方体（淡黄半透明），沿上半圆弧摆放，t 随动画进度展开
+        # 5 个静态插值立方体（淡黄半透明）：始终显示完整插值路径，作为参考轨迹
         for k in range(1, 6):
-            t_k = (k / 6.0) * t_anim
+            t_k = k / 6.0
             qk = quat_slerp(q0, q1, t_k)
-            write_rotated_vertices(vertices, base_vertices, qk)
+            x, y = arc_pos(t_k)
+            pts = cube_screen_points(vertices, screen_coords, state, base_vertices, qk, (x, y, 0.0))
+            cube_list.append((pts, yellow, 0.18, 0x9A9A9A, 1))
 
-            # 上半圆弧：从 (-R,0) -> (R,0)，中间 y>0
-            R = endpoint_x
-            ang = math.pi * (1.0 - t_k)  # t=0 -> pi (左)，t=1 -> 0 (右)
-            x = R * math.cos(ang)
-            y = R * math.sin(ang) * 0.55
-            state.translation = ti.math.vec3([x, y, 0.0])
-            compute_transform(
-                vertices,
-                screen_coords,
-                state.eye_pos, state.target_pos, state.up,
-                state.translation, state.rotation_angles, state.scale,
-                state.fov_y, state.aspect_ratio, state.z_near, state.z_far
-            )
-            draw_cube_faces(gui, screen_coords, faces, yellow, alpha=0.30)
-            draw_cube_edges(gui, screen_coords, state.edges, color=0x2B2B2B, radius=1)
+        # 单个匀速移动的立方体：t = t_anim 直接驱动 slerp（恒定角速度，沿弧匀速）
+        q_move = quat_slerp(q0, q1, t_anim)
+        x, y = arc_pos(t_anim)
+        pts = cube_screen_points(vertices, screen_coords, state, base_vertices, q_move, (x, y, 0.0))
+        cube_list.append((pts, orange, 0.85, 0x2B2B2B, 2))
+
+        render_scene(gui, cube_list, faces, state.edges)
 
         gui.show()
 

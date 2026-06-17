@@ -7,10 +7,19 @@ ti.init(arch=ti.gpu)
 N = 20             # 布料网格分辨率 N x N
 mass = 1.0         # 质点质量
 dt = 5e-4          # 时间步长 (半隐式稳定上限约 0.01，当前远低于此)
-k_s = 10000.0      # 弹簧劲度系数
-k_d = 1.0          # 阻尼系数
+k_s = 10000.0      # 结构弹簧劲度系数
+k_s_shear = 8000.0 # 剪切弹簧劲度系数 (抗错切，可略软于结构弹簧)
+k_s_bend = 2000.0  # 弯曲弹簧劲度系数 (抗折叠，通常更软)
+k_d = 5.0          # 阻尼系数
 gravity = ti.Vector([0.0, -9.8, 0.0])
 max_velocity = 50.0  # 速度上限，防止数值爆炸
+
+# 选做：球体碰撞参数
+# 布料从 j=0 边 (z=-0.5) 的两角垂下，悬挂平面大致在 z≈-0.5；
+# 把球心放在该平面上、竖直方向中段，保证布料能真正搭到球上。
+sphere_center = ti.Vector([0.0, 0.3, -0.5])  # 球心
+sphere_radius = 0.25                          # 球半径
+collision_margin = 0.01                       # 碰撞留白，避免布料穿插/闪烁
 
 # 定义 Taichi 数据场
 x = ti.Vector.field(3, dtype=float, shape=N * N)       # 位置
@@ -23,12 +32,16 @@ x_next = ti.Vector.field(3, dtype=float, shape=N * N)
 v_next = ti.Vector.field(3, dtype=float, shape=N * N)
 f_next = ti.Vector.field(3, dtype=float, shape=N * N)  # 隐式欧拉专用力场
 
-# 弹簧数据场
-max_springs = N * N * 4
+# 弹簧数据场 (结构 + 剪切 + 弯曲，预留 8*N*N 容量)
+max_springs = N * N * 8
 spring_indices = ti.field(dtype=int, shape=max_springs * 2) # 用于渲染画线
 spring_pairs = ti.Vector.field(2, dtype=int, shape=max_springs)
 spring_lengths = ti.field(dtype=float, shape=max_springs)
+spring_ks = ti.field(dtype=float, shape=max_springs)        # 每根弹簧的劲度系数
 num_springs = ti.field(dtype=int, shape=())
+
+# 选做：球体渲染位置 (单独 field 供 GGUI 绘制)
+sphere_pos = ti.Vector.field(3, dtype=float, shape=1)
 
 # ============ 初始化 (拆分为多个 kernel 保证 GPU 同步) ============
 
@@ -47,23 +60,40 @@ def init_positions():
         else:
             is_fixed[idx] = 0
 
+@ti.func
+def add_spring(a: int, b: int, ks: float):
+    """向弹簧数组追加一根弹簧，自然长度取当前两点间距"""
+    c = ti.atomic_add(num_springs[None], 1)
+    spring_pairs[c] = ti.Vector([a, b])
+    spring_lengths[c] = (x[a] - x[b]).norm()
+    spring_ks[c] = ks
+
 @ti.kernel
-def init_springs():
-    """初始化弹簧 (结构弹簧)"""
+def init_springs(enable_shear: int, enable_bending: int):
+    """初始化三类弹簧：
+       - 结构 (Structural)：水平/垂直相邻，撑起基本网格形状
+       - 剪切 (Shear)：对角相邻，抵抗布料错切变形
+       - 弯曲 (Bending)：跨一个点的同行/同列，抵抗布料过度折叠
+    """
     for i, j in ti.ndrange(N, N):
         idx = i * N + j
-        # 右侧相邻点 (结构)
+        # ---- 结构弹簧 ----
         if i < N - 1:
-            idx_right = (i + 1) * N + j
-            c = ti.atomic_add(num_springs[None], 1)
-            spring_pairs[c] = ti.Vector([idx, idx_right])
-            spring_lengths[c] = (x[idx] - x[idx_right]).norm()
-        # 下方相邻点 (结构)
+            add_spring(idx, (i + 1) * N + j, k_s)
         if j < N - 1:
-            idx_down = i * N + (j + 1)
-            c = ti.atomic_add(num_springs[None], 1)
-            spring_pairs[c] = ti.Vector([idx, idx_down])
-            spring_lengths[c] = (x[idx] - x[idx_down]).norm()
+            add_spring(idx, i * N + (j + 1), k_s)
+        # ---- 剪切弹簧 (两条对角线) ----
+        if enable_shear == 1:
+            if i < N - 1 and j < N - 1:
+                add_spring(idx, (i + 1) * N + (j + 1), k_s_shear)
+            if i < N - 1 and j > 0:
+                add_spring(idx, (i + 1) * N + (j - 1), k_s_shear)
+        # ---- 弯曲弹簧 (隔一个点相连) ----
+        if enable_bending == 1:
+            if i < N - 2:
+                add_spring(idx, (i + 2) * N + j, k_s_bend)
+            if j < N - 2:
+                add_spring(idx, i * N + (j + 2), k_s_bend)
 
 @ti.kernel
 def init_spring_indices():
@@ -72,12 +102,18 @@ def init_spring_indices():
         spring_indices[i * 2] = spring_pairs[i][0]
         spring_indices[i * 2 + 1] = spring_pairs[i][1]
 
-def init_cloth():
+@ti.kernel
+def init_sphere():
+    """把碰撞球心写入渲染 field"""
+    sphere_pos[0] = sphere_center
+
+def init_cloth(enable_shear=True, enable_bending=True):
     """从 Python 层按顺序调用各初始化 kernel，确保 GPU 同步"""
     num_springs[None] = 0  # 重置弹簧计数，防止重复调用时累加
     init_positions()
-    init_springs()
+    init_springs(1 if enable_shear else 0, 1 if enable_bending else 0)
     init_spring_indices()
+    init_sphere()
 
 # ============ 合并的力计算函数 (ti.func 内联到 kernel 中，减少启动开销) ============
 
@@ -98,7 +134,7 @@ def compute_forces_on(pos: ti.template(), vel: ti.template(), force: ti.template
         dist = d.norm()
         if dist > 1e-6:
             d_normalized = d / dist
-            f_spring = -k_s * (dist - spring_lengths[i]) * d_normalized
+            f_spring = -spring_ks[i] * (dist - spring_lengths[i]) * d_normalized
             ti.atomic_add(force[idx_a], f_spring)
             ti.atomic_add(force[idx_b], -f_spring)
 
@@ -109,10 +145,26 @@ def clamp_velocity(vel: ti.template(), idx: int):
     if vel_norm > max_velocity:
         vel[idx] = vel[idx] / vel_norm * max_velocity
 
+@ti.func
+def handle_sphere_collision(pos: ti.template(), vel: ti.template(), enabled: int):
+    """球体碰撞处理：质点进入球内时推回球面，并消除朝球心的法向速度。
+       enabled 作为整型开关传入，保证顶层 for 循环仍可并行。"""
+    surface = sphere_radius + collision_margin
+    for i in range(N * N):
+        if enabled == 1 and is_fixed[i] == 0:
+            diff = pos[i] - sphere_center
+            dist = diff.norm()
+            if dist < surface:
+                n = diff / (dist + 1e-9)
+                pos[i] = sphere_center + n * surface  # 投影回球面外侧
+                vn = vel[i].dot(n)
+                if vn < 0.0:
+                    vel[i] -= vn * n  # 去掉指向球心的速度分量
+
 # ============ 合并的积分 kernel (每步仅 1 次 kernel 启动) ============
 
 @ti.kernel
-def step_explicit():
+def step_explicit(collide: int):
     """显式欧拉 (Explicit Euler) - 极易发散
        全部计算合并在单个 kernel 中，最小化 GPU 启动开销"""
     compute_forces_on(x, v, f)
@@ -121,9 +173,10 @@ def step_explicit():
             x[i] += v[i] * dt          # 用旧速度更新位置
             v[i] += (f[i] / mass) * dt  # 用旧力更新速度
             clamp_velocity(v, i)
+    handle_sphere_collision(x, v, collide)
 
 @ti.kernel
-def step_semi_implicit():
+def step_semi_implicit(collide: int):
     """半隐式欧拉 (Semi-Implicit Euler) - 相对稳定
        全部计算合并在单个 kernel 中，最小化 GPU 启动开销"""
     compute_forces_on(x, v, f)
@@ -132,9 +185,10 @@ def step_semi_implicit():
             v[i] += (f[i] / mass) * dt  # 先更新速度
             clamp_velocity(v, i)
             x[i] += v[i] * dt           # 用新速度更新位置
+    handle_sphere_collision(x, v, collide)
 
 @ti.kernel
-def step_implicit_iter():
+def step_implicit_iter(collide: int):
     """隐式欧拉 (Implicit Euler) - 使用定点迭代法近似求解
        全部计算合并在单个 kernel 中 (ti.static 展开迭代)"""
     # 1. 复制当前状态到预测场
@@ -153,14 +207,13 @@ def step_implicit_iter():
     for i in range(N * N):
         v[i] = v_next[i]
         x[i] = x_next[i]
+    handle_sphere_collision(x, v, collide)
 
 # ============ 主函数 ============
 
 def main():
-    init_cloth()
-
     # 建立 GGUI 窗口
-    window = ti.ui.Window("Games101 - Mass Spring System", (800, 800))
+    window = ti.ui.Window("Games101 - Mass Spring System", (800,800))
     canvas = window.get_canvas()
     scene = window.get_scene()
     camera = ti.ui.Camera()
@@ -169,10 +222,16 @@ def main():
 
     current_method = 1 # 0: 显式, 1: 半隐式, 2: 隐式
     paused = False
+    enable_shear = True       # 选做：剪切弹簧
+    enable_bending = True     # 选做：弯曲弹簧
+    enable_collision = True   # 选做：球体碰撞
+
+    # 初次构建（含选做弹簧）
+    init_cloth(enable_shear, enable_bending)
 
     while window.running:
         # =========== GUI 控制面板 ===========
-        window.GUI.begin("Control Panel", 0.02, 0.02, 0.38, 0.36)
+        window.GUI.begin("Control Panel", 0.02, 0.02, 0.42, 0.56)
 
         window.GUI.text("Integration Method:")
 
@@ -183,13 +242,33 @@ def main():
 
         if window.GUI.button(prefix_0 + "Explicit Euler (Explosive)"):
             current_method = 0
-            init_cloth()  # 切换方法时重置，防止从不稳定状态继续
+            init_cloth(enable_shear, enable_bending)  # 切换方法时重置，防止从不稳定状态继续
         if window.GUI.button(prefix_1 + "Semi-Implicit Euler (Stable)"):
             current_method = 1
-            init_cloth()
+            init_cloth(enable_shear, enable_bending)
         if window.GUI.button(prefix_2 + "Implicit Euler (Damped)"):
             current_method = 2
-            init_cloth()
+            init_cloth(enable_shear, enable_bending)
+
+        window.GUI.text("")  # 空行分隔
+        window.GUI.text("Springs (rebuild on toggle):")
+
+        # 剪切 / 弯曲弹簧开关（切换后需重建弹簧）
+        shear_label = ("[x] " if enable_shear else "[ ] ") + "Shear Springs"
+        if window.GUI.button(shear_label):
+            enable_shear = not enable_shear
+            init_cloth(enable_shear, enable_bending)
+        bend_label = ("[x] " if enable_bending else "[ ] ") + "Bending Springs"
+        if window.GUI.button(bend_label):
+            enable_bending = not enable_bending
+            init_cloth(enable_shear, enable_bending)
+
+        window.GUI.text("")  # 空行分隔
+
+        # 球体碰撞开关（无需重建）
+        collide_label = ("[x] " if enable_collision else "[ ] ") + "Sphere Collision"
+        if window.GUI.button(collide_label):
+            enable_collision = not enable_collision
 
         window.GUI.text("")  # 空行分隔
 
@@ -200,20 +279,21 @@ def main():
 
         # 重置按钮
         if window.GUI.button("Reset Cloth"):
-            init_cloth()
+            init_cloth(enable_shear, enable_bending)
 
         window.GUI.end()
         # ====================================
 
+        collide_flag = 1 if enable_collision else 0
         if not paused:
             # 每帧物理子步更新 (40步 × 5e-4 = 0.02s/帧 ≈ 实时速度)
             for _ in range(40):
                 if current_method == 0:
-                    step_explicit()
+                    step_explicit(collide_flag)
                 elif current_method == 1:
-                    step_semi_implicit()
+                    step_semi_implicit(collide_flag)
                 elif current_method == 2:
-                    step_implicit_iter()
+                    step_implicit_iter(collide_flag)
 
         # 渲染场景
         camera.track_user_inputs(window, movement_speed=0.03, hold_key=ti.ui.RMB)
@@ -224,6 +304,10 @@ def main():
         # 绘制网格顶点和弹簧线框
         scene.particles(x, radius=0.015, color=(0.2, 0.6, 1.0))
         scene.lines(x, indices=spring_indices, width=1.5, color=(0.8, 0.8, 0.8))
+
+        # 绘制碰撞球
+        if enable_collision:
+            scene.particles(sphere_pos, radius=sphere_radius, color=(0.9, 0.45, 0.3))
 
         canvas.scene(scene)
 

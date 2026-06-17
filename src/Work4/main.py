@@ -13,6 +13,13 @@ Kd = ti.field(ti.f32, shape=())
 Ks = ti.field(ti.f32, shape=())
 shininess = ti.field(ti.f32, shape=())
 
+# 着色开关：use_blinn 选择 Blinn-Phong / Phong；enable_shadow 控制硬阴影
+use_blinn = ti.field(ti.i32, shape=())
+enable_shadow = ti.field(ti.i32, shape=())
+
+# 光源位置（render 与阴影测试共用）
+light_pos = ti.Vector([2.0, 3.0, 4.0])
+
 @ti.func
 def normalize(v):
     return v / v.norm(1e-5)
@@ -89,6 +96,25 @@ def intersect_cone(ro, rd, apex, base_y, radius):
                 
     return t, normal
 
+# --- 场景定义（render 与阴影测试共用同一组几何体）---
+SPH_CENTER = ti.Vector([-1.2, -0.2, 0.0])
+SPH_RADIUS = 1.2
+CONE_APEX = ti.Vector([1.2, 1.2, 0.0])
+CONE_BASE_Y = -1.4
+CONE_RADIUS = 1.2
+
+@ti.func
+def occluded(ro, rd, max_dist):
+    """暗影射线：从 ro 沿 rd 出发，在 max_dist 之内若击中任意物体则返回 True"""
+    blocked = False
+    t_sph, _ = intersect_sphere(ro, rd, SPH_CENTER, SPH_RADIUS)
+    if 1e-3 < t_sph < max_dist:
+        blocked = True
+    t_cone, _ = intersect_cone(ro, rd, CONE_APEX, CONE_BASE_Y, CONE_RADIUS)
+    if 1e-3 < t_cone < max_dist:
+        blocked = True
+    return blocked
+
 @ti.kernel
 def render():
     for i, j in pixels:
@@ -104,7 +130,7 @@ def render():
         hit_color = ti.Vector([0.0, 0.0, 0.0])
         
         # 1. 渲染红球 (放在左边)
-        t_sph, n_sph = intersect_sphere(ro, rd, ti.Vector([-1.2, -0.2, 0.0]), 1.2)
+        t_sph, n_sph = intersect_sphere(ro, rd, SPH_CENTER, SPH_RADIUS)
         if 0 < t_sph < min_t:
             min_t = t_sph
             hit_normal = n_sph
@@ -112,7 +138,7 @@ def render():
             
         # 2. 渲染紫色圆锥 (放在右边)
         # 顶点在 y=1.2，底面在 y=-1.4
-        t_cone, n_cone = intersect_cone(ro, rd, ti.Vector([1.2, 1.2, 0.0]), -1.4, 1.2)
+        t_cone, n_cone = intersect_cone(ro, rd, CONE_APEX, CONE_BASE_Y, CONE_RADIUS)
         if 0 < t_cone < min_t:
             min_t = t_cone
             hit_normal = n_cone
@@ -126,29 +152,43 @@ def render():
             p = ro + rd * min_t
             N = hit_normal
             
-            # 光源设置
-            light_pos = ti.Vector([2.0, 3.0, 4.0])
             light_color = ti.Vector([1.0, 1.0, 1.0]) 
             
             L = normalize(light_pos - p)
             V = normalize(ro - p)
 
-            # --- Phong 光照模型 ---
+            # 环境光始终存在
             ambient = Ka[None] * light_color * hit_color
-            
-            diff = ti.max(0.0, N.dot(L))
-            diffuse = Kd[None] * diff * light_color * hit_color
-            
-            R = normalize(reflect(-L, N))
-            spec = ti.max(0.0, R.dot(V)) ** shininess[None]
-            specular = Ks[None] * spec * light_color 
-            
-            color = ambient + diffuse + specular
+
+            # --- 硬阴影：沿法线偏移交点后发射暗影射线探测光源 ---
+            in_shadow = False
+            if enable_shadow[None] == 1:
+                dist_to_light = (light_pos - p).norm()
+                shadow_origin = p + N * 1e-3
+                in_shadow = occluded(shadow_origin, L, dist_to_light)
+
+            color = ambient
+            if not in_shadow:
+                # 漫反射
+                diff = ti.max(0.0, N.dot(L))
+                diffuse = Kd[None] * diff * light_color * hit_color
+
+                # 高光：Blinn-Phong 用半程向量 H，Phong 用反射向量 R
+                spec = 0.0
+                if use_blinn[None] == 1:
+                    H = normalize(L + V)
+                    spec = ti.max(0.0, N.dot(H)) ** shininess[None]
+                else:
+                    R = normalize(reflect(-L, N))
+                    spec = ti.max(0.0, R.dot(V)) ** shininess[None]
+                specular = Ks[None] * spec * light_color
+
+                color = ambient + diffuse + specular
                 
         pixels[i, j] = ti.math.clamp(color, 0.0, 1.0)
 
 def main():
-    window = ti.ui.Window("Phong Shading Demo", (res_x, res_y))
+    window = ti.ui.Window("Phong / Blinn-Phong Shading Demo", (res_x, res_y))
     canvas = window.get_canvas()
     gui = window.get_gui()
     
@@ -158,6 +198,10 @@ def main():
     Ks[None] = 0.5
     shininess[None] = 32.0
 
+    # 初始化着色开关
+    use_blinn[None] = 1
+    enable_shadow[None] = 1
+
     while window.running:
         # 执行并行渲染
         render()
@@ -166,11 +210,13 @@ def main():
         canvas.set_image(pixels)
         
         # 绘制交互面板
-        with gui.sub_window("Material Parameters", 0.7, 0.05, 0.28, 0.22):
+        with gui.sub_window("Material Parameters", 0.7, 0.05, 0.28, 0.30):
             Ka[None] = gui.slider_float('Ka (Ambient)', Ka[None], 0.0, 1.0)
             Kd[None] = gui.slider_float('Kd (Diffuse)', Kd[None], 0.0, 1.0)
             Ks[None] = gui.slider_float('Ks (Specular)', Ks[None], 0.0, 1.0)
             shininess[None] = gui.slider_float('N (Shininess)', shininess[None], 1.0, 128.0)
+            use_blinn[None] = 1 if gui.checkbox('Blinn-Phong', use_blinn[None] == 1) else 0
+            enable_shadow[None] = 1 if gui.checkbox('Hard Shadow', enable_shadow[None] == 1) else 0
 
         # 显示窗口
         window.show()

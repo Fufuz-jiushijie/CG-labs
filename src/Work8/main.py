@@ -382,6 +382,8 @@ def main(args):
     num_vertices = model.v_template.shape[0]
     num_faces = faces.shape[0]
     num_joints = model.lbs_weights.shape[1]
+    # betas 维度：以模型实际可用的 shape 主成分个数为准
+    betas_dim = int(getattr(model, "num_betas", model.shapedirs.shape[-1]))
 
     # 构造示例参数
     betas = build_demo_shape(device, dtype, num_betas=args.num_betas)
@@ -475,7 +477,8 @@ def main(args):
         f.write(f"num_vertices: {num_vertices}\n")
         f.write(f"num_faces: {num_faces}\n")
         f.write(f"num_joints(from lbs_weights): {num_joints}\n")
-        f.write(f"num_betas: {args.num_betas}\n")
+        f.write(f"betas_dim(model.num_betas): {betas_dim}\n")
+        f.write(f"num_betas(used): {args.num_betas}\n")
         f.write(f"visualized_joint_id: {joint_id}\n")
         f.write(f"manual_vs_official_mean_abs_error: {mean_err:.10f}\n")
         f.write(f"manual_vs_official_max_abs_error: {max_err:.10f}\n")
@@ -484,6 +487,7 @@ def main(args):
     print(f"顶点数: {num_vertices}")
     print(f"面片数: {num_faces}")
     print(f"关节数: {num_joints}")
+    print(f"betas 维度: {betas_dim}")
     print(f"手写 LBS 与官方 forward 的平均绝对误差: {mean_err:.10f}")
     print(f"手写 LBS 与官方 forward 的最大绝对误差: {max_err:.10f}")
     print(f"结果已保存到: {out_dir}")

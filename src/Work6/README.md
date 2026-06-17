@@ -150,7 +150,7 @@ Jupyter 下使用 `IPython.display.clear_output` 刷新日志；每 20 步保存
 ### 7.2 旋转展示与剪影对比
 
 <div align="center">
-<img src="../../gifs/Work6/Cow_mesh.gif" alt="优化后模型旋转" width="520">
+<img src="../../gifs/Work6/Cow_mesh.gif" alt="优化后模型背面，可以看到细节与原始模型还是存在一定差异" width="520">
 </div>
 
 <div align="center">
