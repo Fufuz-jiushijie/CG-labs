@@ -209,6 +209,6 @@ def compute_transform(
 `uv run -m src.Work2.main_quat_slerp`  
 
 <div align="center">
-<img src="../../gifs/Work2/rotate_slerp.gif" width="200">
+<img src="../../gifs/Work2/rotate_slerp.gif" width="500">
 </div>
 原理：使用四元数进行插值
