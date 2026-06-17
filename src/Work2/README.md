@@ -1,9 +1,13 @@
-# CG实验2：🧊 Taichi 3D Rendering Pipeline: From Math to Pixels
+# 实验 2：旋转与变换
+202411030025 王劭勋 25AI
 
-本项目完全通过底层的线性代数与矩阵运算，手写实现经典的 MVP (Model-View-Projection) 变换、齐次坐标系映射以及透视除法。
+本实验通过底层矩阵运算手写实现经典的 MVP (Model-View-Projection) 变换、齐次坐标系映射以及透视除法。
 将其应用于平面三角形和空间正方体两个案例，搭建渲染流水线并展示效果。
 
-# 📐 核心架构：渲染流水线
+### 📝 [手写笔记 - MVP矩阵推导](../../gifs/handwrittennotes_MVP.pdf)
+> 点击上方链接查看手写推导PDF。
+
+# 📐 渲染流水线
 
 由于设备限制，本项目以笔记本 CPU 为内核，完整模拟了顶点处理流程：
 
@@ -200,8 +204,7 @@ def compute_transform(
 - **类型声明必须**：Taichi 是静态编译语言，参数必须声明类型
 - **避免 Python 对象**：Kernel 内部不要使用 list、dict 等 Python 对象
 
-### 📝 [手写笔记 - MVP矩阵推导](../../gifs/handwrittennotes_MVP.pdf)
-> 点击上方链接查看手写推导PDF。
+
 
 # Extra: 通过四元数进行旋转插值
 
